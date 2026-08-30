@@ -1,0 +1,30 @@
+{
+  "_comment": "Target VOEBB branches. Each entry's 'match_names' lists every name variant that may show up in the catalog's holdings/location text for that branch -- matching against ANY of them counts as a hit for that branch. Edit this file (not the code) if VOEBB renames a branch or you want to check different branches.",
+  "branches": [
+    {
+      "id": "steglitz-zehlendorf",
+      "label": "Steglitz-Zehlendorf: Ingeborg-Drewitz-Bibliothek",
+      "match_names": [
+        "Ingeborg-Drewitz-Bibliothek"
+      ]
+    },
+    {
+      "id": "tempelhof-schoeneberg",
+      "label": "Tempelhof-Schöneberg: Bibliothek Schöneberg",
+      "match_names": [
+        "Bibliothek Schöneberg",
+        "Theodor-Heuss-Bibliothek"
+      ]
+    },
+    {
+      "id": "zlb",
+      "label": "ZLB Zentral- und Landesbibliothek",
+      "match_names": [
+        "Zentral- und Landesbibliothek",
+        "Amerika-Gedenkbibliothek",
+        "Berliner Stadtbibliothek",
+        "ZLB"
+      ]
+    }
+  ]
+}

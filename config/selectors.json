@@ -1,0 +1,15 @@
+{
+  "_instructions": "Placeholders. Run `vobb-read explore` against the live VOEBB search form, look at out/explore/*_summary.json and the screenshots, then fill in the real selectors below. Any field left null keeps using the built-in heuristics in vobb_read/voebb.py. Delete this _instructions key or leave it, it's ignored by the loader.",
+  "search_input": null,
+  "search_submit": null,
+  "new_session_button": null,
+  "holdings_container": null,
+  "result_link": null,
+  "no_results_text": [
+    "keine treffer",
+    "0 treffer",
+    "nichts gefunden",
+    "keine ergebnisse",
+    "ihre suche.*ergab keine"
+  ]
+}

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>carla's bookshelf: to-read</title>
+<link>https://www.goodreads.com/review/list/131854402-carla?shelf=to-read</link>
+<description>to-read shelf</description>
+<item>
+  <guid isPermaLink="false">review123456</guid>
+  <pubDate>Sun, 01 Jun 2025 12:00:00 -0700</pubDate>
+  <title>Piranesi</title>
+  <link>https://www.goodreads.com/review/show/1234567890</link>
+  <book_id>50202953</book_id>
+  <book_image_url>https://images.gr-assets.com/books/example1.jpg</book_image_url>
+  <book_description><![CDATA[A haunting novel.]]></book_description>
+  <num_pages>245</num_pages>
+  <isbn>1635575637</isbn>
+  <isbn13>9781635575639</isbn13>
+  <book_published>2020</book_published>
+  <author_name>Susanna Clarke</author_name>
+  <user_name>carla</user_name>
+  <user_rating>0</user_rating>
+  <user_read_at></user_read_at>
+  <user_date_added>Sun, 01 Jun 2025 12:00:00 -0700</user_date_added>
+  <user_shelves>to-read</user_shelves>
+  <user_review><![CDATA[]]></user_review>
+  <average_rating>4.25</average_rating>
+  <book>
+    <num_pages>245</num_pages>
+  </book>
+  <description><![CDATA[A haunting novel.]]></description>
+</item>
+<item>
+  <guid isPermaLink="false">review123457</guid>
+  <pubDate>Sun, 02 Jun 2025 12:00:00 -0700</pubDate>
+  <title>Some Untranslated Book</title>
+  <link>https://www.goodreads.com/review/show/1234567891</link>
+  <book_id>1111111</book_id>
+  <book_image_url>https://images.gr-assets.com/books/example2.jpg</book_image_url>
+  <book_description><![CDATA[No ISBN13 on this one.]]></book_description>
+  <num_pages>100</num_pages>
+  <isbn></isbn>
+  <isbn13></isbn13>
+  <book_published>2019</book_published>
+  <author_name>Someone Else</author_name>
+  <user_name>carla</user_name>
+  <user_rating>0</user_rating>
+  <user_read_at></user_read_at>
+  <user_date_added>Sun, 02 Jun 2025 12:00:00 -0700</user_date_added>
+  <user_shelves>to-read</user_shelves>
+  <user_review><![CDATA[]]></user_review>
+  <average_rating>3.90</average_rating>
+  <book>
+    <num_pages>100</num_pages>
+  </book>
+  <description><![CDATA[No ISBN13 on this one.]]></description>
+</item>
+</channel>
+</rss>

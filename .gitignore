@@ -1,0 +1,22 @@
+# secrets / personal config
+.env
+
+# personal data produced by runs
+out/
+*.report.md
+*.report.html
+data/cache/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# playwright
+/test-results/
+/playwright-report/
+.playwright-debug/
