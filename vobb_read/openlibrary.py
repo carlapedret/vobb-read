@@ -7,10 +7,22 @@ to keep request counts low and be polite to Open Library), and fall back to
 the per-edition `/isbn/<isbn13>.json` endpoint for anything the batch call
 didn't resolve.
 
+If both of those come up empty for a book's ISBN13 and we also have its
+original ISBN10 (the common case, since Goodreads' feed often only supplies
+that -- see goodreads.py), we try ISBN10 as a bibkey too before giving up.
+This isn't a language/format guess: ISBN10 and the derived ISBN13 name the
+exact same physical edition, so if Open Library happens to have that
+edition catalogued under only one of the two equivalent identifiers, we
+still want to find it. Confirmed useful on a real shelf -- e.g. "Flesh" by
+David Szalay resolved by ISBN10 after its derived ISBN13 came up empty
+(too new to be catalogued under that key yet).
+
 We NEVER infer language or format from title/publisher -- if Open Library
-has no usable data for a book, is_english / is_physical come back as None
-("unverifiable") rather than a guess, and the book is excluded from the
-final filtered list with a note explaining why, so it can be checked by hand.
+has no usable data for a book under any of its identifiers,
+is_target_language / is_physical come back as None ("unverifiable") rather
+than a guess, and the
+book is excluded from the final filtered list with a note explaining why,
+so it can be checked by hand.
 """
 
 from __future__ import annotations
@@ -28,6 +40,12 @@ API_ISBN_URL = "https://openlibrary.org/isbn/{isbn13}.json"
 USER_AGENT = "vobb-read/0.1 (personal reading-list tool; https://github.com/carlapedret/vobb-read)"
 
 BATCH_SIZE = 20  # Open Library docs allow up to ~100 bibkeys per call; stay conservative.
+
+# Open Library language codes we accept. Edit this list to change which
+# languages pass the filter -- e.g. add "fre" for French. Each code is
+# Open Library's own (usually MARC/ISO 639-2), taken from the /languages/xxx
+# key on an edition's "languages" field.
+TARGET_LANGUAGES = ["eng", "spa"]
 
 # Format-string classification. Open Library's `physical_format` field is a
 # free-text string from the publisher record, not a controlled vocabulary,
@@ -112,10 +130,11 @@ def classify_format(physical_format: str | None) -> bool | None:
 
 
 def classify_language(language_codes: list[str]) -> bool | None:
-    """True = English present, False = languages known but not English, None = no data."""
+    """True = at least one of TARGET_LANGUAGES present, False = languages
+    known but none of them match, None = no language data at all."""
     if not language_codes:
         return None
-    return "eng" in language_codes
+    return any(code in language_codes for code in TARGET_LANGUAGES)
 
 
 def extract_language_codes(details: dict) -> list[str]:
@@ -160,36 +179,56 @@ def _fetch_single(isbn13: str, timeout: int) -> dict | None:
     return resp.json()
 
 
+def _resolve_after_batch_miss(book: Book, timeout: int, delay: float) -> dict | None:
+    """Called only when the batch call for `book.isbn13` came up empty.
+    Tries, in order: the single-edition endpoint for the ISBN13, then (if we
+    have one) the book's original ISBN10 as a bibkey -- see module docstring
+    for why ISBN10 is a legitimate fallback, not a guess. Returns the first
+    hit, or None if nothing resolved."""
+    try:
+        details = _fetch_single(book.isbn13, timeout)
+    except requests.RequestException:
+        details = None
+    time.sleep(delay)
+    if details is not None:
+        return details
+
+    if book.isbn:
+        try:
+            alt = _fetch_batch([book.isbn], timeout)
+        except requests.RequestException:
+            alt = {}
+        time.sleep(delay)
+        details = alt.get(book.isbn)
+        if details is not None:
+            return details
+
+    return None
+
+
 def enrich_books(
     books: list[Book],
     cache_path: Path | None = None,
     delay: float = 0.5,
     timeout: int = 20,
 ) -> list[EnrichedBook]:
-    """Look up every book's ISBN13 on Open Library and classify it.
+    """Look up every book's ISBN13 (falling back to its ISBN10 if the ISBN13
+    doesn't resolve -- see module docstring) on Open Library and classify it.
 
-    Books without an ISBN13 in the Goodreads feed are returned unverifiable
-    (we do not fall back to ISBN10 or title search for language/format --
-    the task calls for ISBN13 specifically).
+    Books without an ISBN13 in the Goodreads feed at all are unverifiable.
     """
     cache = OpenLibraryCache(cache_path)
 
-    to_fetch = [b.isbn13 for b in books if b.isbn13 and not cache.has(b.isbn13)]
+    to_fetch = [b for b in books if b.isbn13 and not cache.has(b.isbn13)]
     for i in range(0, len(to_fetch), BATCH_SIZE):
-        batch = to_fetch[i : i + BATCH_SIZE]
-        results = _fetch_batch(batch, timeout)
-        for isbn13, details in results.items():
+        batch_books = to_fetch[i : i + BATCH_SIZE]
+        batch_isbn13 = [b.isbn13 for b in batch_books]
+        results = _fetch_batch(batch_isbn13, timeout)
+        for book in batch_books:
+            details = results.get(book.isbn13)
             if details is None:
-                # Not resolved by the batch call -- try the single-edition
-                # endpoint before giving up, then be polite either way.
-                try:
-                    single = _fetch_single(isbn13, timeout)
-                except requests.RequestException:
-                    single = None
-                cache.set(isbn13, single)
-                time.sleep(delay)
-            else:
-                cache.set(isbn13, details)
+                details = _resolve_after_batch_miss(book, timeout, delay)
+            cache.set(book.isbn13, details)
         time.sleep(delay)
     cache.save()
 
@@ -206,21 +245,24 @@ def enrich_books(
 
         details = cache.get(book.isbn13)
         if details is None:
+            reason = "not found on Open Library (tried ISBN13" + (
+                " and ISBN10)" if book.isbn else ", no ISBN10 to fall back to)"
+            )
             enriched.append(
                 EnrichedBook(
                     book=book,
-                    lookup_note=f"ISBN13 {book.isbn13} not found on Open Library.",
+                    lookup_note=f"ISBN13 {book.isbn13} {reason}.",
                 )
             )
             continue
 
         lang_codes = extract_language_codes(details)
         fmt = details.get("physical_format")
-        is_english = classify_language(lang_codes)
+        is_target_language = classify_language(lang_codes)
         is_physical = classify_format(fmt)
 
         notes = []
-        if is_english is None:
+        if is_target_language is None:
             notes.append("Open Library has no language data for this edition")
         if is_physical is None:
             notes.append(f"could not classify physical_format={fmt!r}")
@@ -230,7 +272,7 @@ def enrich_books(
                 book=book,
                 language_codes=lang_codes,
                 physical_format=fmt,
-                is_english=is_english,
+                is_target_language=is_target_language,
                 is_physical=is_physical,
                 lookup_note="; ".join(notes),
             )

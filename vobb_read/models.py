@@ -27,17 +27,17 @@ class EnrichedBook:
     book: Book
     language_codes: list[str] = field(default_factory=list)
     physical_format: str | None = None
-    is_english: bool | None = None  # None = could not determine
+    is_target_language: bool | None = None  # None = could not determine. "Target" = openlibrary.TARGET_LANGUAGES
     is_physical: bool | None = None  # None = could not determine
     lookup_note: str = ""  # e.g. "not found on Open Library", "no language data"
 
     @property
     def passes_filter(self) -> bool:
-        return self.is_english is True and self.is_physical is True
+        return self.is_target_language is True and self.is_physical is True
 
     @property
     def unverifiable(self) -> bool:
-        return self.is_english is None or self.is_physical is None
+        return self.is_target_language is None or self.is_physical is None
 
 
 @dataclass

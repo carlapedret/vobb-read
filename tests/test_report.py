@@ -4,7 +4,9 @@ from vobb_read.report import generate_markdown
 
 def _enriched(title, author, isbn13="9780000000000"):
     book = Book(book_id=title, title=title, author=author, isbn=None, isbn13=isbn13)
-    return EnrichedBook(book=book, language_codes=["eng"], physical_format="Paperback", is_english=True, is_physical=True)
+    return EnrichedBook(
+        book=book, language_codes=["eng"], physical_format="Paperback", is_target_language=True, is_physical=True
+    )
 
 
 def test_report_puts_zero_match_books_at_bottom():
@@ -38,9 +40,11 @@ def test_report_puts_zero_match_books_at_bottom():
 
 def test_report_includes_excluded_appendix():
     excluded_book = Book(book_id="x", title="Excluded Book", author="Author X", isbn=None, isbn13="9781111111111")
-    excluded = EnrichedBook(excluded_book, is_english=False, language_codes=["ger"], lookup_note="not English (language: ger)")
+    excluded = EnrichedBook(
+        excluded_book, is_target_language=False, language_codes=["ger"], lookup_note="not English/Spanish (language: ger)"
+    )
 
     md = generate_markdown([], excluded=[excluded])
     assert "Appendix: excluded" in md
     assert "Excluded Book" in md
-    assert "not English" in md
+    assert "not English/Spanish" in md

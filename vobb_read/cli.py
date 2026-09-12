@@ -2,8 +2,9 @@
 
 `vobb-read run` wraps the whole pipeline (steps 1-5 from the project spec)
 behind one command, per step 6 -- fetch the Goodreads shelf, filter to
-physical/English books, show you the filtered list to sanity-check, then
-check each one against the three target VOEBB branches and write a report.
+physical/English-or-Spanish books, show you the filtered list to
+sanity-check, then check each one against the three target VOEBB branches
+and write a report.
 
 `vobb-read explore` is the one-time (or "VOEBB changed their site again")
 manual calibration step -- see voebb.py's module docstring.
@@ -56,12 +57,12 @@ def _fetch_and_filter(rss_url: str) -> tuple[list[EnrichedBook], list[EnrichedBo
 
     kept = [e for e in enriched if e.passes_filter]
     excluded = [e for e in enriched if not e.passes_filter]
-    print(f"  {len(kept)} physical/English book(s) kept, {len(excluded)} excluded.")
+    print(f"  {len(kept)} physical/English-or-Spanish book(s) kept, {len(excluded)} excluded.")
     return kept, excluded
 
 
 def _print_filtered_list(kept: list[EnrichedBook]):
-    print("\nFiltered list (physical + English only):")
+    print("\nFiltered list (physical + English or Spanish):")
     for e in sorted(kept, key=lambda e: e.book.title.lower()):
         print(f"  - {e.book.title} — {e.book.author}  [ISBN13 {e.book.isbn13}]")
     print()
@@ -247,7 +248,7 @@ def _enriched_from_json(d: dict) -> EnrichedBook:
         book=book,
         language_codes=d.get("language_codes", []),
         physical_format=d.get("physical_format"),
-        is_english=d.get("is_english"),
+        is_target_language=d.get("is_target_language"),
         is_physical=d.get("is_physical"),
         lookup_note=d.get("lookup_note", ""),
     )

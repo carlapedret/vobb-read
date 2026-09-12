@@ -53,7 +53,7 @@ def generate_markdown(
     lines.append(f"Generated {generated_at.strftime('%Y-%m-%d %H:%M')}")
     lines.append("")
     lines.append(
-        f"Checked **{len(results)}** book(s) (physical, English-language) against: "
+        f"Checked **{len(results)}** book(s) (physical, English or Spanish) against: "
         "Ingeborg-Drewitz-Bibliothek, Bibliothek Schöneberg (Theodor-Heuss-Bibliothek), "
         "and ZLB Zentral- und Landesbibliothek."
     )
@@ -89,7 +89,7 @@ def generate_markdown(
         lines.append("## Appendix: excluded before the catalog check")
         lines.append("")
         lines.append(
-            "_Dropped by the physical-book / English-language filter, or Open Library "
+            "_Dropped by the physical-book / English-or-Spanish filter, or Open Library "
             "had no usable data to verify one of those two things. Listed here so you "
             "can see what was checked and double-check by hand if needed — nothing is "
             "silently dropped._"
@@ -118,8 +118,8 @@ def _excluded_table(excluded: list[EnrichedBook]) -> str:
 
 
 def _default_reason(e: EnrichedBook) -> str:
-    if e.is_english is False:
-        return f"not English (language: {', '.join(e.language_codes) or 'unknown'})"
+    if e.is_target_language is False:
+        return f"not English/Spanish (language: {', '.join(e.language_codes) or 'unknown'})"
     if e.is_physical is False:
         return f"not a physical edition (format: {e.physical_format})"
     return "excluded"
