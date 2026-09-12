@@ -54,5 +54,30 @@
   </book>
   <description><![CDATA[No ISBN13 on this one.]]></description>
 </item>
+<item>
+  <guid isPermaLink="false">review123458</guid>
+  <pubDate>Sun, 03 Jun 2025 12:00:00 -0700</pubDate>
+  <title>Perfection</title>
+  <link>https://www.goodreads.com/review/show/8816017062</link>
+  <book_id>203200544</book_id>
+  <book_image_url>https://images.gr-assets.com/books/example3.jpg</book_image_url>
+  <book_description><![CDATA[Goodreads gave us isbn but not isbn13 for this one -- real-world case.]]></book_description>
+  <num_pages>120</num_pages>
+  <isbn>1804271055</isbn>
+  <isbn13></isbn13>
+  <book_published>2025</book_published>
+  <author_name>Vincenzo Latronico</author_name>
+  <user_name>carla</user_name>
+  <user_rating>0</user_rating>
+  <user_read_at></user_read_at>
+  <user_date_added>Sun, 03 Jun 2025 12:00:00 -0700</user_date_added>
+  <user_shelves>to-read</user_shelves>
+  <user_review><![CDATA[]]></user_review>
+  <average_rating>3.95</average_rating>
+  <book>
+    <num_pages>120</num_pages>
+  </book>
+  <description><![CDATA[Goodreads gave us isbn but not isbn13 for this one -- real-world case.]]></description>
+</item>
 </channel>
 </rss>
