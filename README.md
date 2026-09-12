@@ -106,6 +106,12 @@ vobb-read report                # step 5: render out/report.md from out/results.
 - `vobb_read/openlibrary.py`'s `TARGET_LANGUAGES` list — currently
   `["eng", "spa"]`. Edit that list to change which languages pass the filter
   (Open Library's own language codes, e.g. add `"fre"` for French).
+- `config/overrides.json` — books you've manually verified are physical +
+  English/Spanish but that Open Library has zero data on under either ISBN
+  (common for very new releases). Add an entry keyed by ISBN13 with a short
+  note, and that book bypasses the Open Library check entirely and goes
+  straight into the filtered list every run. Empty by default except for
+  one real example.
 
 ## Notes
 

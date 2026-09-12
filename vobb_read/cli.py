@@ -46,6 +46,25 @@ def _config(name: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
+def _load_overrides(path: Path) -> dict[str, str]:
+    """Books you've manually verified are physical + English/Spanish but that
+    Open Library has no usable data for at all (so the automatic check would
+    always exclude them, no matter how good the lookup logic gets) --
+    see config/overrides.json."""
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text())
+    return data.get("isbn13", {})
+
+
+def _apply_overrides(enriched: list[EnrichedBook], overrides: dict[str, str]) -> None:
+    for e in enriched:
+        if e.book.isbn13 and e.book.isbn13 in overrides:
+            e.is_target_language = True
+            e.is_physical = True
+            e.lookup_note = f"manual override: {overrides[e.book.isbn13]}"
+
+
 def _fetch_and_filter(rss_url: str) -> tuple[list[EnrichedBook], list[EnrichedBook]]:
     print(f"Fetching Goodreads shelf feed...")
     books = goodreads.fetch_shelf(rss_url)
@@ -54,6 +73,7 @@ def _fetch_and_filter(rss_url: str) -> tuple[list[EnrichedBook], list[EnrichedBo
     print("Looking up each ISBN13 on Open Library (language + format)...")
     cache_path = _out_dir() / "cache" / "openlibrary_cache.json"
     enriched = openlibrary.enrich_books(books, cache_path=cache_path)
+    _apply_overrides(enriched, _load_overrides(_config("overrides.json")))
 
     kept = [e for e in enriched if e.passes_filter]
     excluded = [e for e in enriched if not e.passes_filter]
