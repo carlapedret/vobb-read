@@ -24,6 +24,16 @@ Calibrated against the live site on 2026-09-12 via `vobb-read explore`
   holdings down by *Bezirk* (borough), not by individual branch -- not
   precise enough for matching a specific branch, so we always click through
   to the full Exemplarangaben table instead.
+- Gotcha (found via a real run on a 100-book shelf, then fixed): the result
+  *list* page also contains the word "Standort" (it's a button label on
+  every row), and separately the site carries a hidden branch-picker
+  dropdown listing every VOEBB branch on literally every page. An earlier
+  version of this module used a keyword check to decide "are we on the
+  detail page yet", which that word tripped, so it never clicked through
+  and instead pattern-matched the *whole page* -- meaning it "found" all 3
+  target branches in that dropdown for every single book, always. Ground
+  truth is now the actual presence of the Exemplarangaben table (see
+  _read_exemplare_rows), never a keyword guess on page text.
 
 Everything else below this point (what a "0 results" page says, what the
 stale-session interstitial looks like) is still an educated guess -- we
@@ -63,10 +73,6 @@ NO_RESULTS_PATTERNS = [
 ]
 
 NEW_SESSION_PATTERNS = [r"neue sitzung"]
-
-# Any of these appearing on the page is a strong signal we're already on a
-# book's full record ("Vollanzeige") page rather than a result list.
-DETAIL_PAGE_MARKERS = ["exemplarangaben", "exemplar", "standort", "zweigstelle", "verfügbarkeit"]
 
 AVAILABLE_KEYWORDS = ["verfügbar", "ausleihbar", "vorhanden", "am standort", "entleihbar", "frei", "bestellbar"]
 ON_LOAN_KEYWORDS = ["entliehen", "ausgeliehen", "verliehen", "nicht verfügbar", "vorgemerkt", "zurückerwartet"]
@@ -307,11 +313,6 @@ def _run_one_search(page, base_url: str, query: str, selectors: Selectors, timeo
     return True
 
 
-def _looks_like_detail_page(body_text: str) -> bool:
-    low = body_text.lower()
-    return any(m in low for m in DETAIL_PAGE_MARKERS)
-
-
 def _find_physical_result_link(page):
     """Return the first result-row title link that belongs to a physical
     (non-online-only) item, using the lrb_<row index>_12 "Standort" button
@@ -324,14 +325,20 @@ def _find_physical_result_link(page):
     return None
 
 
-def _open_best_physical_result(page, selectors: Selectors, timeout=DEFAULT_TIMEOUT_MS):
-    """If we landed on a result list rather than a single record's full
-    detail page, open the best candidate: the first row that has a
-    "Standort" button (i.e. is a physical item, not online-only e-media)."""
-    body_text = page.inner_text("body")
-    if _looks_like_detail_page(body_text):
-        return  # already on a detail/holdings page (e.g. a unique ISBN match)
+def _click_best_physical_result(page, selectors: Selectors, timeout=DEFAULT_TIMEOUT_MS):
+    """Open the best candidate result: the first row that has a "Standort"
+    button (i.e. is a physical item, not online-only e-media). Caller is
+    responsible for first checking whether we're already on a detail page
+    (see search_book) -- this function always tries to click through.
 
+    NOTE: earlier code tried to detect "already on a detail page" from
+    keywords like "standort" in the page text, but VOEBB's result *list*
+    page also contains that word (it's the button label on every row) --
+    that false-positive made every book's holdings come out identical,
+    scanning an unrelated branch-picker dropdown that's present on every
+    page. Ground truth is the Exemplarangaben table itself (see
+    _read_exemplare_rows), not a keyword guess.
+    """
     if selectors.result_link:
         link = page.locator(selectors.result_link).first
     else:
@@ -401,20 +408,28 @@ def search_book(
                 result["matched_by"] = "title_author"
 
         if result["found"]:
-            _open_best_physical_result(page, selectors)
+            # Ground truth for "are we on a page with real holdings data" is
+            # the Exemplarangaben table itself -- not a keyword guess (see
+            # _click_best_physical_result's docstring for why that broke).
             table_rows = _read_exemplare_rows(page)
+            if not table_rows:
+                _click_best_physical_result(page, selectors)
+                table_rows = _read_exemplare_rows(page)
+
             if table_rows:
                 result["holdings"] = extract_holdings_from_table_rows(table_rows, branches)
-            else:
-                # Fallback for pages that don't expose a clean Exemplarangaben
-                # table (unexpected layout, or we didn't manage to land on
-                # the detail page at all) -- best-effort text scan.
-                container_text = (
-                    page.inner_text(selectors.holdings_container)
-                    if selectors.holdings_container
-                    else page.inner_text("body")
+            elif selectors.holdings_container:
+                # Only trust a whole-page text scan when a specific
+                # container was explicitly calibrated for it -- scanning the
+                # *whole* page risks matching unrelated chrome (e.g. VOEBB's
+                # branch-picker dropdown, present on every page, lists every
+                # branch in Berlin regardless of this book's actual copies).
+                result["holdings"] = extract_holdings_from_text(
+                    page.inner_text(selectors.holdings_container), branches
                 )
-                result["holdings"] = extract_holdings_from_text(container_text, branches)
+            # else: found in the catalog but we couldn't read a holdings
+            # table for it -- holdings stays [], which is honest (no
+            # branches) rather than risking a false match.
     except Exception as exc:  # noqa: BLE001 - surface any Playwright/site error per-book, don't crash the run
         result["error"] = str(exc)
 
