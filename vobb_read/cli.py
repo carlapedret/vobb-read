@@ -263,6 +263,12 @@ def cmd_run(args):
 
     results = _run_catalog_check(kept, base_url, headless=not args.headed, delay_min=delay_min, delay_max=delay_max)
 
+    # Save the raw catalog results too (same as `search` does), so a later
+    # `vobb-read report` can re-render (e.g. after a code update, or to
+    # retry just the report step) without hitting VOEBB again.
+    results_path = _out_dir() / "results.json"
+    results_path.write_text(json.dumps([_result_to_json(r) for r in results], indent=2, ensure_ascii=False))
+
     md = report.generate_markdown(results, excluded=excluded)
     stamp = datetime.now().strftime("%Y%m%d-%H%M")
     out_path = _out_dir() / f"report-{stamp}.md"
