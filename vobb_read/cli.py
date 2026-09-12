@@ -201,6 +201,15 @@ def cmd_search(args):
 # ---------------------------------------------------------------------------
 
 
+def _open_in_browser(path: Path) -> None:
+    import webbrowser
+
+    try:
+        webbrowser.open(path.resolve().as_uri())
+    except Exception:
+        pass  # non-fatal -- the file is still on disk, just open it by hand
+
+
 def cmd_report(args):
     input_path = Path(args.input) if args.input else _out_dir() / "results.json"
     if not input_path.exists():
@@ -215,7 +224,14 @@ def cmd_report(args):
     md = report.generate_markdown(results, excluded=excluded)
     out_path = Path(args.output) if args.output else _out_dir() / "report.md"
     out_path.write_text(md)
+
+    html_path = out_path.with_suffix(".html")
+    html_path.write_text(report.generate_html(results, excluded=excluded))
+
     print(f"Report written to {out_path}")
+    print(f"Nicer-looking version: {html_path}")
+    if not args.no_open:
+        _open_in_browser(html_path)
 
 
 # ---------------------------------------------------------------------------
@@ -248,9 +264,17 @@ def cmd_run(args):
     results = _run_catalog_check(kept, base_url, headless=not args.headed, delay_min=delay_min, delay_max=delay_max)
 
     md = report.generate_markdown(results, excluded=excluded)
-    out_path = _out_dir() / f"report-{datetime.now().strftime('%Y%m%d-%H%M')}.md"
+    stamp = datetime.now().strftime("%Y%m%d-%H%M")
+    out_path = _out_dir() / f"report-{stamp}.md"
     out_path.write_text(md)
+
+    html_path = _out_dir() / f"report-{stamp}.html"
+    html_path.write_text(report.generate_html(results, excluded=excluded))
+
     print(f"\nDone. Report written to {out_path}")
+    print(f"Nicer-looking version: {html_path}")
+    if not args.no_open:
+        _open_in_browser(html_path)
 
 
 # ---------------------------------------------------------------------------
@@ -322,9 +346,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--headed", action="store_true", help="Show the browser window instead of running headless.")
     p_search.set_defaults(func=cmd_search)
 
-    p_report = sub.add_parser("report", help="Render the Markdown report from saved results (step 5).")
+    p_report = sub.add_parser("report", help="Render the report (Markdown + HTML) from saved results (step 5).")
     p_report.add_argument("--input", help="Path to results.json (default: out/results.json).")
-    p_report.add_argument("--output", help="Where to write the report (default: out/report.md).")
+    p_report.add_argument("--output", help="Where to write the Markdown report (default: out/report.md); the HTML version is written next to it with a .html extension.")
+    p_report.add_argument("--no-open", action="store_true", help="Don't automatically open the HTML report in your browser.")
     p_report.set_defaults(func=cmd_report)
 
     p_run = sub.add_parser("run", help="Run the whole pipeline: fetch, filter, sanity-check, search, report (step 6).")
@@ -332,6 +357,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--base-url", help="VOEBB search form URL (overrides VOEBB_BASE_URL / the default).")
     p_run.add_argument("--headed", action="store_true", help="Show the browser window instead of running headless.")
     p_run.add_argument("-y", "--yes", action="store_true", help="Skip the filtered-list confirmation prompt.")
+    p_run.add_argument("--no-open", action="store_true", help="Don't automatically open the HTML report in your browser.")
     p_run.set_defaults(func=cmd_run)
 
     return parser

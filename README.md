@@ -47,9 +47,16 @@ the built-in heuristics) and/or `vobb_read/voebb.py` itself.
      or Berliner Stadtbibliothek)
 
    Waits 2–5 seconds between searches.
-4. **Report** — writes a Markdown report: title, author, which target
-   branches hold it, and status per branch. Books with no matches are
-   listed at the bottom, not omitted.
+4. **Report** — writes a Markdown report (`report.md`) *and* a
+   nicer-looking, self-contained HTML version (`report.html`) you can just
+   double-click and open in a browser: color-coded status badges (green =
+   available now, orange = on loan, etc.), a search box to filter by
+   title/author, and the excluded appendix tucked into a collapsible
+   section instead of cluttering the main view. `vobb-read run`/`report`
+   open the HTML version for you automatically when they finish (pass
+   `--no-open` to skip that). Either way: title, author, which target
+   branches hold it, and status per branch — books with no matches listed
+   at the bottom, not omitted.
 
 ## Setup
 
@@ -92,8 +99,12 @@ if a run gets interrupted partway:
 vobb-read fetch                 # steps 1-2: fetch + filter, saves out/filtered.json
 vobb-read explore --isbn13 ...  # step 3: one-time calibration against the live site
 vobb-read search [--headed]     # step 4: check out/filtered.json against VOEBB, saves out/results.json
-vobb-read report                # step 5: render out/report.md from out/results.json
+vobb-read report                # step 5: render out/report.md + out/report.html from out/results.json
 ```
+
+Running `vobb-read report` on its own (e.g. after a `search` that already
+finished) is the fast way to get the nicer HTML view without re-checking
+VÖBB — it just re-renders from the already-saved `out/results.json`.
 
 ## Configuration
 
