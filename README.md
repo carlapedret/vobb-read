@@ -30,12 +30,19 @@ the built-in heuristics) and/or `vobb_read/voebb.py` itself.
 2. **Filter** — looks up each book's ISBN13 (falling back to its ISBN10 as
    an alternate lookup key if the ISBN13 alone doesn't resolve — same
    physical edition either way) on the [Open Library Books
-   API](https://openlibrary.org/dev/docs/api/books) and keeps only books
-   that are English **or** Spanish **and** a physical edition (not
+   API](https://openlibrary.org/dev/docs/api/books). If Open Library has no
+   language data at all for that book — no record under either ISBN, or a
+   record missing the languages field — it also tries the [Google Books
+   API](https://developers.google.com/books/docs/v1/using) as a second,
+   independent real source before giving up (common for very new releases
+   and smaller-press books Open Library hasn't indexed yet). Keeps only
+   books that are English **or** Spanish **and** a physical edition (not
    ebook/Kindle/audiobook). Language and format are never guessed from
-   title/publisher — only from Open Library's own data. Anything Open
-   Library can't verify is excluded and listed separately in the report,
-   not silently dropped. Shows you the filtered list before continuing.
+   title/publisher — only from these two APIs' own data. Anything neither
+   source can verify is excluded and listed separately in the report, not
+   silently dropped — for that small remainder, `config/overrides.json`
+   lets you add a book by hand once you've checked it yourself. Shows you
+   the filtered list before continuing.
 3. **Search** — for each remaining book, searches the live VÖBB catalog
    (fresh visit to the search form every time — VÖBB invalidates reused
    result links) by ISBN13, falling back to title + author. Checks whether
@@ -116,7 +123,10 @@ VÖBB — it just re-renders from the already-saved `out/results.json`.
   after the first `explore` run.
 - `vobb_read/openlibrary.py`'s `TARGET_LANGUAGES` list — currently
   `["eng", "spa"]`. Edit that list to change which languages pass the filter
-  (Open Library's own language codes, e.g. add `"fre"` for French).
+  (Open Library's own language codes, e.g. add `"fre"` for French). If you
+  add a language here, also add its 2-letter code to
+  `vobb_read/googlebooks.py`'s `TARGET_LANGUAGES` (e.g. `"fr"`), so the
+  Google Books fallback stays in sync.
 - `config/overrides.json` — books you've manually verified are physical +
   English/Spanish but that Open Library has zero data on under either ISBN
   (common for very new releases). Add an entry keyed by ISBN13 with a short
@@ -126,12 +136,13 @@ VÖBB — it just re-renders from the already-saved `out/results.json`.
 
 ## Notes
 
-- Open Library lookups are cached in `out/cache/openlibrary_cache.json` so
-  re-runs don't re-fetch books you've already looked up. Delete that file
+- Open Library lookups are cached in `out/cache/openlibrary_cache.json`, and
+  Google Books fallback lookups in `out/cache/googlebooks_cache.json`, so
+  re-runs don't re-fetch books you've already looked up. Delete either file
   if you change `TARGET_LANGUAGES` and want previously-excluded books
   re-evaluated (otherwise the cached *edition data* is still fine to
   reuse — only the classification changes — but the simplest fix if you
-  want a full re-check is to just delete the cache file).
+  want a full re-check is to just delete the cache file(s)).
 - This is a personal-shelf checker, not a scraper: one book at a time, with
   a 2–5s delay between VÖBB searches.
 - A large fraction of "excluded" books are typically `could not classify
