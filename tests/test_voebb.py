@@ -1,6 +1,7 @@
 from vobb_read.voebb import (
     BranchConfig,
     classify_status,
+    extract_holdings_from_table_rows,
     extract_holdings_from_text,
     is_no_results,
     match_branches,
@@ -76,3 +77,36 @@ def test_is_no_results():
     assert is_no_results("Ihre Suche ergab 0 Treffer.", patterns) is True
     assert is_no_results("Es wurden keine Treffer gefunden.", patterns) is True
     assert is_no_results("1 Treffer gefunden", patterns) is False
+
+
+# Real Exemplarangaben table content from a live VOEBB search (12 Sep 2026,
+# "Piranesi" by Susanna Clarke), reviewed by hand -- see voebb.py's module
+# docstring. Rows are (Bibliothek cell, Verfügbarkeit cell).
+REAL_EXEMPLARE_ROWS = [
+    ("Marzahn-Hellersdorf: Bezirkszentralbibliothek Mark Twain", "Verfügbar"),
+    ("Mitte: Bezirkszentralbibliothek Philipp Schaeffer", "Ausgeliehen - Fällig am: 28.9.2026"),
+    ("Pankow: Heinrich-Böll-Bibliothek", "Ausgeliehen - Fällig am: 5.10.2026 - Beschädigt / Beschmutzt"),
+    ("ZLB: Amerika-Gedenkbibliothek (AGB)", "Ausgeliehen - Fällig am: 28.9.2026"),
+    ("ZLB: Amerika-Gedenkbibliothek (AGB)", "Ausgeliehen - Fällig am: 28.9.2026"),
+]
+
+
+def test_extract_holdings_from_table_rows_real_example():
+    holdings = extract_holdings_from_table_rows(REAL_EXEMPLARE_ROWS, BRANCHES)
+    # Only the two ZLB copies are one of our 3 target branches; the others
+    # (Marzahn-Hellersdorf, Mitte, Pankow) correctly produce no holding.
+    assert len(holdings) == 2
+    assert all(h.branch_id == "zlb" for h in holdings)
+    assert all(h.status == "on_loan" for h in holdings)
+
+
+def test_extract_holdings_from_table_rows_matches_other_target_branches():
+    rows = [
+        ("Steglitz-Zehlendorf: Ingeborg-Drewitz-Bibliothek", "Verfügbar"),
+        ("Tempelhof-Schöneberg: Bibliothek Schöneberg", "Verfügbar"),
+        ("Lichtenberg: Stadtteilbibliothek Hellersdorf", "Verfügbar"),  # not a target branch
+    ]
+    holdings = extract_holdings_from_table_rows(rows, BRANCHES)
+    branch_ids = {h.branch_id for h in holdings}
+    assert branch_ids == {"steglitz-zehlendorf", "tempelhof-schoeneberg"}
+    assert all(h.status == "available" for h in holdings)

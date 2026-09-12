@@ -1,25 +1,38 @@
 """Drive the VOEBB (Berlin public library) aDIS/BMS catalog with Playwright.
 
-*** IMPORTANT: this module has NOT been verified against the live site. ***
+Calibrated against the live site on 2026-09-12 via `vobb-read explore`
+(manual walkthrough, screenshots reviewed by hand):
 
-The sandbox this code was originally written in has no network egress to
-voebb.de at all (org network policy blocks it), so the selectors below are
-written defensively -- semantic Playwright locators (labels, roles, visible
-text) with graceful fallbacks -- rather than hardcoded IDs guessed blindly.
+- Search form: text input `#Autosuggest`, submit `input[name="$Button"]`.
+- A free-text search (title+author, or ISBN13) lands on a "Trefferliste"
+  (result list). Each result row has a title link to its full record
+  (`a[href*="sp=SAK..."]`); rows that are physical items (not online-only
+  e-media) additionally have a "Standort" button whose id is `lrb_<N>_12`,
+  where N is the row's 0-indexed position -- same N as that row's SAK link,
+  since both are emitted in row order. That id's presence is how we tell a
+  physical row from an online-only one without knowing anything else about
+  the row's markup.
+- Clicking a result's title (not "Standort") opens the full record
+  ("Vollanzeige") page, which has an "Exemplarangaben" table listing every
+  physical copy: columns Bibliothek | Standort | Signatur |
+  Bestellmöglichkeit | Verfügbarkeit. The Bibliothek cell is
+  "<Bezirk>: <branch building name>" (e.g. "ZLB: Amerika-Gedenkbibliothek
+  (AGB)", "Pankow: Heinrich-Böll-Bibliothek") -- our branch name matching
+  is a substring check, so the Bezirk prefix doesn't matter. Verfügbarkeit
+  reads e.g. "Verfügbar" or "Ausgeliehen - Fällig am: 28.9.2026".
+- The quicker "Standort" popup on the result list itself only breaks
+  holdings down by *Bezirk* (borough), not by individual branch -- not
+  precise enough for matching a specific branch, so we always click through
+  to the full Exemplarangaben table instead.
 
-Before trusting `search_book()` / the `run` command, calibrate it for real:
+Everything else below this point (what a "0 results" page says, what the
+stale-session interstitial looks like) is still an educated guess -- we
+haven't happened to see either live yet. If `vobb-read run` starts
+misbehaving on those cases, re-run `vobb-read explore` to see the real page
+and update this module / config/selectors.json accordingly.
 
-    vobb-read explore
-
-That opens a headed browser against the live search form, runs one or two
-test searches, and dumps a screenshot + an auto-detected list of every input/
-button/link on the page into out/explore/ so you (or Claude, next time it has
-network access) can fill in config/selectors.json with the real field names.
-Once selectors.json has real values, they take priority over the heuristics
-below.
-
-VOEBB also invalidates reused/bookmarked result-page URLs ("Bitte klicken Sie
-auf 'Neue Sitzung'") -- so every single search here starts from a fresh
+VOEBB invalidates reused/bookmarked result-page URLs ("Bitte klicken Sie auf
+'Neue Sitzung'") -- so every single search here starts from a fresh
 page.goto(base_url), never from a stored results link.
 """
 
@@ -35,6 +48,12 @@ from .models import BranchHolding
 
 DEFAULT_TIMEOUT_MS = 15_000
 
+# Every result-row title link observed so far matches this pattern
+# (?sp=SPROD00&sp=SAK<digits>). Rows are emitted in display order, and a
+# physical (non-online-only) row additionally has a "Standort" button whose
+# id is lrb_<row index>_12 -- see module docstring.
+RESULT_LINK_SELECTOR = 'a[href*="sp=SAK"]'
+
 NO_RESULTS_PATTERNS = [
     r"keine treffer",
     r"0 treffer",
@@ -44,6 +63,10 @@ NO_RESULTS_PATTERNS = [
 ]
 
 NEW_SESSION_PATTERNS = [r"neue sitzung"]
+
+# Any of these appearing on the page is a strong signal we're already on a
+# book's full record ("Vollanzeige") page rather than a result list.
+DETAIL_PAGE_MARKERS = ["exemplarangaben", "exemplar", "standort", "zweigstelle", "verfügbarkeit"]
 
 AVAILABLE_KEYWORDS = ["verfügbar", "ausleihbar", "vorhanden", "am standort", "entleihbar", "frei", "bestellbar"]
 ON_LOAN_KEYWORDS = ["entliehen", "ausgeliehen", "verliehen", "nicht verfügbar", "vorgemerkt", "zurückerwartet"]
@@ -147,6 +170,27 @@ def extract_holdings_from_text(full_text: str, branches: list[BranchConfig]) -> 
                     matched_name=matched_name,
                     status=status,
                     raw_text=window,
+                )
+            )
+    return holdings
+
+
+def extract_holdings_from_table_rows(rows: list[tuple[str, str]], branches: list[BranchConfig]) -> list[BranchHolding]:
+    """Build BranchHolding entries from (Bibliothek cell, Verfügbarkeit cell)
+    pairs read off a book's Exemplarangaben table -- this is the precise,
+    calibrated path (see module docstring), used instead of
+    extract_holdings_from_text whenever that table is present.
+    """
+    holdings: list[BranchHolding] = []
+    for branch_text, status_text in rows:
+        for branch, matched_name in match_branches(branch_text, branches):
+            holdings.append(
+                BranchHolding(
+                    branch_id=branch.id,
+                    branch_label=branch.label,
+                    matched_name=matched_name,
+                    status=classify_status(status_text),
+                    raw_text=f"{branch_text} — {status_text}",
                 )
             )
     return holdings
@@ -263,22 +307,71 @@ def _run_one_search(page, base_url: str, query: str, selectors: Selectors, timeo
     return True
 
 
-def _maybe_open_first_result(page, selectors: Selectors, timeout=DEFAULT_TIMEOUT_MS):
-    """If we landed on a result list rather than a single record's detail/
-    holdings view, open the first result. Detection is heuristic: if the
-    page already mentions holdings-ish vocabulary, assume it's a detail page."""
+def _looks_like_detail_page(body_text: str) -> bool:
+    low = body_text.lower()
+    return any(m in low for m in DETAIL_PAGE_MARKERS)
+
+
+def _find_physical_result_link(page):
+    """Return the first result-row title link that belongs to a physical
+    (non-online-only) item, using the lrb_<row index>_12 "Standort" button
+    id as the tell -- see module docstring. None if no row qualifies."""
+    links = page.locator(RESULT_LINK_SELECTOR)
+    count = links.count()
+    for i in range(count):
+        if page.locator(f"#lrb_{i}_12").count() > 0:
+            return links.nth(i)
+    return None
+
+
+def _open_best_physical_result(page, selectors: Selectors, timeout=DEFAULT_TIMEOUT_MS):
+    """If we landed on a result list rather than a single record's full
+    detail page, open the best candidate: the first row that has a
+    "Standort" button (i.e. is a physical item, not online-only e-media)."""
     body_text = page.inner_text("body")
-    detail_markers = ["exemplar", "standort", "zweigstelle", "verfügbarkeit", "status"]
-    if any(m in body_text.lower() for m in detail_markers):
-        return  # already looks like a detail/holdings page
+    if _looks_like_detail_page(body_text):
+        return  # already on a detail/holdings page (e.g. a unique ISBN match)
 
     if selectors.result_link:
         link = page.locator(selectors.result_link).first
     else:
-        link = page.locator("a").filter(has_text=re.compile(r".{3,}")).first
-    if link and link.count() > 0:
+        link = _find_physical_result_link(page)
+        if link is None:
+            # No row exposed a Standort button (e.g. every hit was an
+            # online-only edition) -- fall back to the first result at all,
+            # so we at least attempt something rather than give up silently.
+            fallback = page.locator(RESULT_LINK_SELECTOR).first
+            link = fallback if fallback.count() > 0 else None
+
+    if link is not None and link.count() > 0:
         link.click()
         page.wait_for_load_state("networkidle", timeout=timeout)
+
+
+def _read_exemplare_rows(page) -> list[tuple[str, str]]:
+    """Read (Bibliothek, Verfügbarkeit) pairs from the 'Exemplarangaben'
+    copies table on a book's full detail page, if one is present. Returns
+    [] if no such table is found (caller falls back to text scanning)."""
+    table = (
+        page.locator("table")
+        .filter(has_text=re.compile("Bibliothek", re.I))
+        .filter(has_text=re.compile("Verfügbarkeit", re.I))
+    )
+    if table.count() == 0:
+        return []
+
+    rows = table.first.locator("tr")
+    pairs: list[tuple[str, str]] = []
+    for i in range(rows.count()):
+        cells = rows.nth(i).locator("td")
+        n = cells.count()
+        if n < 2:
+            continue  # header row (th, not td) or something malformed
+        branch_text = cells.nth(0).inner_text().strip()
+        status_text = cells.nth(n - 1).inner_text().strip()
+        if branch_text:
+            pairs.append((branch_text, status_text))
+    return pairs
 
 
 def search_book(
@@ -308,11 +401,20 @@ def search_book(
                 result["matched_by"] = "title_author"
 
         if result["found"]:
-            _maybe_open_first_result(page, selectors)
-            container_text = (
-                page.inner_text(selectors.holdings_container) if selectors.holdings_container else page.inner_text("body")
-            )
-            result["holdings"] = extract_holdings_from_text(container_text, branches)
+            _open_best_physical_result(page, selectors)
+            table_rows = _read_exemplare_rows(page)
+            if table_rows:
+                result["holdings"] = extract_holdings_from_table_rows(table_rows, branches)
+            else:
+                # Fallback for pages that don't expose a clean Exemplarangaben
+                # table (unexpected layout, or we didn't manage to land on
+                # the detail page at all) -- best-effort text scan.
+                container_text = (
+                    page.inner_text(selectors.holdings_container)
+                    if selectors.holdings_container
+                    else page.inner_text("body")
+                )
+                result["holdings"] = extract_holdings_from_text(container_text, branches)
     except Exception as exc:  # noqa: BLE001 - surface any Playwright/site error per-book, don't crash the run
         result["error"] = str(exc)
 

@@ -1,7 +1,7 @@
 {
-  "_instructions": "Placeholders. Run `vobb-read explore` against the live VOEBB search form, look at out/explore/*_summary.json and the screenshots, then fill in the real selectors below. Any field left null keeps using the built-in heuristics in vobb_read/voebb.py. Delete this _instructions key or leave it, it's ignored by the loader.",
-  "search_input": null,
-  "search_submit": null,
+  "_instructions": "search_input and search_submit calibrated 2026-09-12 against the live site. new_session_button and result_link are left null -- new_session_button because we haven't seen the stale-session interstitial live yet (the built-in text-match heuristic handles it for now), and result_link because vobb_read/voebb.py picks the right result row itself (first physical/non-online-only hit) rather than using a single fixed selector -- see its module docstring. If VOEBB changes their site and things break, re-run `vobb-read explore` and update this file / voebb.py to match.",
+  "search_input": "#Autosuggest",
+  "search_submit": "input[name=\"$Button\"]",
   "new_session_button": null,
   "holdings_container": null,
   "result_link": null,
