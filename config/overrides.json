@@ -1,6 +1,7 @@
 {
   "_instructions": "Books you've manually verified are physical + English/Spanish but that Open Library has no usable data for at all under either ISBN (so the automatic check will always exclude them, no matter how good the lookup logic gets). Add an entry keyed by the book's ISBN13, with a short note for your own reference (what you checked and when). These bypass the Open Library check entirely and go straight into the filtered list.",
   "isbn13": {
-    "9781982122799": "Flesh by David Szalay -- confirmed physical English copy at Amerika-Gedenkbibliothek (ZLB) via VOEBB directly, 2026-09-12; too new for Open Library to have indexed yet"
+    "9781982122799": "Flesh by David Szalay -- confirmed physical English copy at Amerika-Gedenkbibliothek (ZLB) via VOEBB directly, 2026-09-12; too new for Open Library to have indexed yet",
+    "9781668020821": "Etna by Paul Yoon -- confirmed physical English copy held at a target VOEBB branch directly, 2026-09-12; Open Library has no record under either ISBN"
   }
 }
