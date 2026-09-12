@@ -51,6 +51,12 @@ def test_classify_status():
     assert classify_status("something unrelated") == "unknown"
 
 
+def test_classify_status_nicht_im_regal():
+    # Real Verfügbarkeit text from a live copy (2026-09-12) -- initially
+    # misclassified as "unknown" since it doesn't contain "entliehen" etc.
+    assert classify_status("Nicht im Regal") == "on_loan"
+
+
 def test_extract_holdings_from_text():
     text = (
         "Suchergebnis: Piranesi\n"
@@ -110,3 +116,27 @@ def test_extract_holdings_from_table_rows_matches_other_target_branches():
     branch_ids = {h.branch_id for h in holdings}
     assert branch_ids == {"steglitz-zehlendorf", "tempelhof-schoeneberg"}
     assert all(h.status == "available" for h in holdings)
+
+
+# Real Exemplarangaben table for "Astragal" by Albertine Sarrazin (12 Sep
+# 2026, a screenshot from a live run) -- 6 physical copies total: 2 at a
+# non-target branch, 4 at ZLB (one copy "Nicht im Regal", the status text
+# that surfaced the classify_status gap above).
+ASTRAGAL_EXEMPLARE_ROWS = [
+    ("Charlottenburg-Wilmersdorf: Heinrich-Schulz-Bibliothek mit Musikabteilung", "Ausgeliehen - Fällig am: 24.9.2026"),
+    ("Charlottenburg-Wilmersdorf: Dietrich-Bonhoeffer-Bibliothek", "Nicht im Regal"),
+    ("ZLB: Amerika-Gedenkbibliothek (AGB)", "Nicht im Regal"),
+    ("ZLB: Amerika-Gedenkbibliothek (AGB)", "Ausgeliehen - Fällig am: 10.9.2026"),
+    ("ZLB: Amerika-Gedenkbibliothek (AGB)", "Ausgeliehen - Fällig am: 16.9.2026"),
+    ("ZLB: Amerika-Gedenkbibliothek (AGB)", "Ausgeliehen - Fällig am: 14.9.2026"),
+]
+
+
+def test_extract_holdings_from_table_rows_astragal_multiple_copies_one_branch():
+    holdings = extract_holdings_from_table_rows(ASTRAGAL_EXEMPLARE_ROWS, BRANCHES)
+    # Only the 4 ZLB copies are a target branch (Charlottenburg-Wilmersdorf isn't one).
+    assert len(holdings) == 4
+    assert all(h.branch_id == "zlb" for h in holdings)
+    # All 4 -- including the "Nicht im Regal" one -- now classify as on_loan,
+    # not a mix of on_loan and unknown.
+    assert all(h.status == "on_loan" for h in holdings)

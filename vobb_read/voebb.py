@@ -34,6 +34,14 @@ Calibrated against the live site on 2026-09-12 via `vobb-read explore`
   target branches in that dropdown for every single book, always. Ground
   truth is now the actual presence of the Exemplarangaben table (see
   _read_exemplare_rows), never a keyword guess on page text.
+- A branch can (and does) hold more than one physical copy of the same
+  book -- each copy gets its own Exemplarangaben row, same Bibliothek,
+  different Signatur/Verfügbarkeit. That's normal, not a bug; the report
+  de-dupes identical (branch, status) pairs so it doesn't spam repeated
+  lines for copies that happen to share a status. Verfügbarkeit wording
+  also includes "Nicht im Regal" ("not on the shelf") for a copy that's
+  out/in-transit -- treated as on_loan (see ON_LOAN_KEYWORDS), confirmed
+  on a real 4-copies-at-one-branch example (2026-09-12).
 
 Everything else below this point (what a "0 results" page says, what the
 stale-session interstitial looks like) is still an educated guess -- we
@@ -75,7 +83,16 @@ NO_RESULTS_PATTERNS = [
 NEW_SESSION_PATTERNS = [r"neue sitzung"]
 
 AVAILABLE_KEYWORDS = ["verfügbar", "ausleihbar", "vorhanden", "am standort", "entleihbar", "frei", "bestellbar"]
-ON_LOAN_KEYWORDS = ["entliehen", "ausgeliehen", "verliehen", "nicht verfügbar", "vorgemerkt", "zurückerwartet"]
+ON_LOAN_KEYWORDS = [
+    "entliehen",
+    "ausgeliehen",
+    "verliehen",
+    "nicht verfügbar",
+    "vorgemerkt",
+    "zurückerwartet",
+    "nicht im regal",  # real Verfügbarkeit text seen on a live copy (2026-09-12) -- a copy that's
+    # checked out/pulled/in-transit rather than sitting on the shelf; functionally "not available now"
+]
 REFERENCE_ONLY_KEYWORDS = ["präsenzbestand", "präsenznutzung", "nicht ausleihbar", "lesesaal", "nur vor ort"]
 
 
