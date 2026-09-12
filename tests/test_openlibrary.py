@@ -61,6 +61,7 @@ def test_enrich_books_filters_correctly(monkeypatch, tmp_path):
         Book(book_id="4", title="No ISBN13", author="D", isbn=None, isbn13=None),
         Book(book_id="5", title="Not On Open Library", author="E", isbn="5050505050", isbn13="5555555555555"),
         Book(book_id="6", title="Spanish Paperback", author="F", isbn=None, isbn13="6666666666666"),
+        Book(book_id="7", title="English Unknown Format", author="G", isbn=None, isbn13="7777777777777"),
     ]
 
     batch_payload = {
@@ -68,6 +69,8 @@ def test_enrich_books_filters_correctly(monkeypatch, tmp_path):
         "ISBN:2222222222222": {"details": {"languages": [{"key": "/languages/ger"}], "physical_format": "Paperback"}},
         "ISBN:3333333333333": {"details": {"languages": [{"key": "/languages/eng"}], "physical_format": "Kindle Edition"}},
         "ISBN:6666666666666": {"details": {"languages": [{"key": "/languages/spa"}], "physical_format": "Paperback"}},
+        # no physical_format at all -- Open Library just doesn't have it for this edition
+        "ISBN:7777777777777": {"details": {"languages": [{"key": "/languages/eng"}]}},
         # 5555555555555 (isbn13) intentionally absent -> triggers single-lookup fallback (also 404) ->
         # then the ISBN10 fallback (5050505050) -> that one DOES resolve.
         "ISBN:5050505050": {"details": {"languages": [{"key": "/languages/eng"}], "physical_format": "Paperback"}},
@@ -95,3 +98,5 @@ def test_enrich_books_filters_correctly(monkeypatch, tmp_path):
     assert by_id["4"].unverifiable is True
     assert by_id["5"].passes_filter is True  # resolved via the ISBN10 fallback
     assert by_id["6"].passes_filter is True  # Spanish now passes too
+    assert by_id["7"].passes_filter is True  # confirmed English + unknown format now passes (format filter loosened)
+    assert by_id["7"].is_physical is None
