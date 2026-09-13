@@ -256,7 +256,16 @@ the live site; that's what `vobb-read explore` is for.
   real catalog record) whenever the ISBN13 edition alone shows nothing at
   a target branch, and merges in whatever that edition's Exemplarangaben
   table shows — still real, verified holdings, just checked across two
-  editions instead of trusting one ISBN for the whole title. If you still
-  see a mismatch after updating, it likely means neither edition VOEBB
-  indexed under that title/author matches the copy you saw — worth a
-  manual double-check on the site directly.
+  editions instead of trusting one ISBN for the whole title.
+
+  Second real case the same day: "Normal People" by Sally Rooney *still*
+  showed "not at a target branch" after that fix, because it's a
+  bestseller with several genuinely distinct catalog editions, and the
+  title+author search's *first* physical result still wasn't the right
+  one. Fixed further: the tool now checks every physical edition a search
+  turns up (bounded to 6 per search, stopping as soon as one shows a
+  target-branch hit) instead of just the first — see
+  `_collect_holdings_across_all_editions` in `voebb.py`. If you still see
+  a mismatch after updating, it likely means neither of the (up to 12)
+  editions checked across both searches matches the copy you saw — worth
+  a manual double-check on the site directly.

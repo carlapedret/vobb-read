@@ -370,48 +370,6 @@ def _run_one_search_with_retry(
         return _run_one_search(page, base_url, query, selectors, timeout=timeout)
 
 
-def _find_physical_result_link(page):
-    """Return the first result-row title link that belongs to a physical
-    (non-online-only) item, using the lrb_<row index>_12 "Standort" button
-    id as the tell -- see module docstring. None if no row qualifies."""
-    links = page.locator(RESULT_LINK_SELECTOR)
-    count = links.count()
-    for i in range(count):
-        if page.locator(f"#lrb_{i}_12").count() > 0:
-            return links.nth(i)
-    return None
-
-
-def _click_best_physical_result(page, selectors: Selectors, timeout=DEFAULT_TIMEOUT_MS):
-    """Open the best candidate result: the first row that has a "Standort"
-    button (i.e. is a physical item, not online-only e-media). Caller is
-    responsible for first checking whether we're already on a detail page
-    (see search_book) -- this function always tries to click through.
-
-    NOTE: earlier code tried to detect "already on a detail page" from
-    keywords like "standort" in the page text, but VOEBB's result *list*
-    page also contains that word (it's the button label on every row) --
-    that false-positive made every book's holdings come out identical,
-    scanning an unrelated branch-picker dropdown that's present on every
-    page. Ground truth is the Exemplarangaben table itself (see
-    _read_exemplare_rows), not a keyword guess.
-    """
-    if selectors.result_link:
-        link = page.locator(selectors.result_link).first
-    else:
-        link = _find_physical_result_link(page)
-        if link is None:
-            # No row exposed a Standort button (e.g. every hit was an
-            # online-only edition) -- fall back to the first result at all,
-            # so we at least attempt something rather than give up silently.
-            fallback = page.locator(RESULT_LINK_SELECTOR).first
-            link = fallback if fallback.count() > 0 else None
-
-    if link is not None and link.count() > 0:
-        link.click()
-        page.wait_for_load_state("networkidle", timeout=timeout)
-
-
 def _read_exemplare_rows(page) -> list[tuple[str, str]]:
     """Read (Bibliothek, Verfügbarkeit) pairs from the 'Exemplarangaben'
     copies table on a book's full detail page, if one is present. Returns
@@ -438,16 +396,13 @@ def _read_exemplare_rows(page) -> list[tuple[str, str]]:
     return pairs
 
 
-def _collect_holdings_for_current_result(page, selectors: Selectors, branches: list[BranchConfig]) -> list[BranchHolding]:
-    """Read holdings off whatever result page `page` is currently showing.
-    Ground truth for "are we on a page with real holdings data" is the
-    Exemplarangaben table itself -- not a keyword guess (see
-    _click_best_physical_result's docstring for why that broke)."""
+def _read_holdings_from_detail_page(page, selectors: Selectors, branches: list[BranchConfig]) -> list[BranchHolding]:
+    """Read holdings assuming `page` is already sitting on a book's full
+    detail page (Vollanzeige) -- caller is responsible for having navigated
+    there. Ground truth is the Exemplarangaben table itself -- not a
+    keyword guess (see module docstring's "Ground truth" gotcha for why
+    that broke)."""
     table_rows = _read_exemplare_rows(page)
-    if not table_rows:
-        _click_best_physical_result(page, selectors)
-        table_rows = _read_exemplare_rows(page)
-
     if table_rows:
         return extract_holdings_from_table_rows(table_rows, branches)
     if selectors.holdings_container:
@@ -460,6 +415,70 @@ def _collect_holdings_for_current_result(page, selectors: Selectors, branches: l
     # Found in the catalog but we couldn't read a holdings table for it --
     # [] is honest (no branches) rather than risking a false match.
     return []
+
+
+MAX_EDITIONS_PER_SEARCH = 6
+
+
+def _collect_holdings_across_all_editions(
+    page,
+    base_url: str,
+    query: str,
+    selectors: Selectors,
+    branches: list[BranchConfig],
+    timeout=DEFAULT_TIMEOUT_MS,
+    max_editions: int = MAX_EDITIONS_PER_SEARCH,
+) -> list[BranchHolding]:
+    """Read holdings from every physical edition VOEBB's result list shows
+    for this search, not just the first one -- a popular title can have
+    several genuinely separate catalog records (different print
+    editions/ISBNs), and the specific copy a real person borrowed can be
+    under any of them. Confirmed real case (2026-09-13): "Normal People" by
+    Sally Rooney still showed "not at a target branch" even after also
+    trying a title+author search and checking its first physical result --
+    because that still wasn't the right edition; the user had directly
+    verified a copy checked out from Ingeborg-Drewitz-Bibliothek. Stops
+    early the moment any candidate shows a target-branch holding, and is
+    bounded to `max_editions` real page visits either way, so this stays a
+    quick personal check rather than a scrape of the whole catalog.
+
+    Assumes `page` is already showing the just-submitted search's result
+    (or detail) page, i.e. right after a successful call to
+    _run_one_search_with_retry(page, base_url, query, selectors).
+    """
+    # A single-hit search lands straight on the detail page -- nothing else to check.
+    single_hit = _read_holdings_from_detail_page(page, selectors, branches)
+    if single_hit or _read_exemplare_rows(page):
+        return single_hit
+
+    links = page.locator(RESULT_LINK_SELECTOR)
+    count = links.count()
+    physical_indices = [i for i in range(count) if page.locator(f"#lrb_{i}_12").count() > 0]
+    if not physical_indices and count > 0:
+        # No row exposed a Standort button (e.g. every hit was an
+        # online-only edition) -- try the first result anyway rather than
+        # give up silently.
+        physical_indices = [0]
+    physical_indices = physical_indices[:max_editions]
+
+    holdings: list[BranchHolding] = []
+    for position, idx in enumerate(physical_indices):
+        if holdings:
+            break  # already confirmed a target-branch hit -- good enough
+        if position > 0:
+            # VOEBB invalidates reused/back-navigated result pages (see
+            # module docstring) -- re-run the same search fresh rather than
+            # risking page.go_back(), then click this candidate's row.
+            if not _run_one_search_with_retry(page, base_url, query, selectors, timeout=timeout):
+                continue
+        row_links = page.locator(RESULT_LINK_SELECTOR)
+        if row_links.count() <= idx:
+            continue
+        row_links.nth(idx).click()
+        page.wait_for_load_state("networkidle", timeout=timeout)
+        holdings = _merge_holdings(holdings, _read_holdings_from_detail_page(page, selectors, branches))
+
+    return holdings
 
 
 def _merge_holdings(existing: list[BranchHolding], extra: list[BranchHolding]) -> list[BranchHolding]:
@@ -485,6 +504,9 @@ def search_book(
     """Search VOEBB for one book: try ISBN13 first, then also try
     title+author -- not only as a fallback when ISBN13 finds nothing, but
     *also* when ISBN13 finds the book but at none of the target branches.
+    Each of those two searches, in turn, checks every physical edition its
+    result list shows (see _collect_holdings_across_all_editions), not
+    just the first one.
 
     Why: a library catalog is keyed by exact edition/ISBN, and the physical
     copy VOEBB actually stocks is often a different print edition than
@@ -492,11 +514,16 @@ def search_book(
     real case, 2026-09-13: "Educated" by Tara Westover reported as "found,
     not at a target branch" via its Goodreads ISBN13, while the user had
     directly verified a copy on the shelf at a target branch -- almost
-    certainly a different edition/ISBN of the same title). Searching by
-    title+author too and merging in whatever real holdings that edition's
-    Exemplarangaben table shows is still all real, verified data -- just
-    checking a second real catalog record instead of assuming one ISBN
-    speaks for the whole title.
+    certainly a different edition/ISBN of the same title). A second real
+    case the same day ("Normal People" by Sally Rooney) showed this can
+    take *more* than one extra attempt: even after also trying
+    title+author, its first physical result still wasn't the right
+    edition, since a bestseller can have several genuinely distinct
+    catalog records. Checking every physical edition a search turns up
+    (bounded, and stopping the moment one shows a target-branch hit) is
+    still all real, verified data -- just checking more real catalog
+    records instead of assuming any one of them speaks for the whole
+    title.
 
     Returns {"found": bool, "matched_by": str, "holdings": [BranchHolding], "error": str}
     """
@@ -508,14 +535,15 @@ def search_book(
             if _run_one_search_with_retry(page, base_url, isbn13, selectors):
                 result["found"] = True
                 matched_by.append("isbn13")
-                holdings = _collect_holdings_for_current_result(page, selectors, branches)
+                holdings = _collect_holdings_across_all_editions(page, base_url, isbn13, selectors, branches)
 
         if (not result["found"] or not holdings) and (title or author):
             query = " ".join(p for p in [title, author] if p)
             if _run_one_search_with_retry(page, base_url, query, selectors):
                 result["found"] = True
                 matched_by.append("title_author")
-                holdings = _merge_holdings(holdings, _collect_holdings_for_current_result(page, selectors, branches))
+                extra = _collect_holdings_across_all_editions(page, base_url, query, selectors, branches)
+                holdings = _merge_holdings(holdings, extra)
 
         result["matched_by"] = "+".join(matched_by)
         result["holdings"] = holdings
