@@ -41,7 +41,7 @@ def _found_cell(result: CatalogResult) -> str:
         return f"error: {result.error}"
     if not result.found:
         return "no"
-    return f"yes ({result.matched_by})"
+    return f"yes ({result.matched_by.replace('+', ' + ')})"
 
 
 def generate_markdown(

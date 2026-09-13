@@ -1,5 +1,7 @@
+from vobb_read.models import BranchHolding
 from vobb_read.voebb import (
     BranchConfig,
+    _merge_holdings,
     classify_status,
     extract_holdings_from_table_rows,
     extract_holdings_from_text,
@@ -140,3 +142,26 @@ def test_extract_holdings_from_table_rows_astragal_multiple_copies_one_branch():
     # All 4 -- including the "Nicht im Regal" one -- now classify as on_loan,
     # not a mix of on_loan and unknown.
     assert all(h.status == "on_loan" for h in holdings)
+
+
+def test_merge_holdings_combines_two_editions_deduping_identical_pairs():
+    # Simulates search_book's real case (2026-09-13, "Educated"): the
+    # ISBN13-specific edition shows no target-branch holdings at all, but
+    # the title+author search turns up a different edition that does --
+    # both real Exemplarangaben reads, just from two different catalog
+    # records for the same title.
+    from_isbn13 = []  # this edition wasn't at any target branch
+    from_title_author = [
+        BranchHolding(branch_id="zlb", branch_label="ZLB", matched_name="ZLB", status="available"),
+        BranchHolding(branch_id="zlb", branch_label="ZLB", matched_name="ZLB", status="on_loan"),
+    ]
+    merged = _merge_holdings(from_isbn13, from_title_author)
+    assert len(merged) == 2
+    assert {h.status for h in merged} == {"available", "on_loan"}
+
+    # A second, identical (branch, status) pair from the same or another
+    # search shouldn't be duplicated.
+    more = _merge_holdings(
+        merged, [BranchHolding(branch_id="zlb", branch_label="ZLB", matched_name="ZLB", status="available")]
+    )
+    assert len(more) == 2

@@ -239,3 +239,24 @@ the live site; that's what `vobb-read explore` is for.
   without an API key (confirmed live 2026-09-13). That's why the language
   fallback uses Open Library's own Search API instead (no key needed) —
   see `openlibrary.py`'s module docstring.
+- **A book shows `error: Timeout 15000ms exceeded` in the report** — VOEBB
+  is occasionally just slow to respond; this happened on different books
+  across different runs (2026-09-13), never the same book twice, which
+  points to site slowness rather than anything book-specific. Fixed by
+  retrying once automatically and raising the timeout ceiling (15s → 30s)
+  — see `voebb.py`'s module docstring. If you still see it after
+  updating, it's worth just running `vobb-read run --headed` again.
+- **A book you know is physically at a target branch shows "found, but
+  not at a target branch"** — real case, 2026-09-13: "Educated" by Tara
+  Westover. The Goodreads-shelf ISBN13 names one specific print edition,
+  and VOEBB's catalog record for *that exact edition* genuinely had no
+  target-branch copies — but the library often stocks a *different*
+  edition/ISBN of the same title than whatever's on your Goodreads shelf.
+  Fixed: `search_book` now also checks the title+author search (a second,
+  real catalog record) whenever the ISBN13 edition alone shows nothing at
+  a target branch, and merges in whatever that edition's Exemplarangaben
+  table shows — still real, verified holdings, just checked across two
+  editions instead of trusting one ISBN for the whole title. If you still
+  see a mismatch after updating, it likely means neither edition VOEBB
+  indexed under that title/author matches the copy you saw — worth a
+  manual double-check on the site directly.

@@ -43,6 +43,27 @@ Calibrated against the live site on 2026-09-12 via `vobb-read explore`
   out/in-transit -- treated as on_loan (see ON_LOAN_KEYWORDS), confirmed
   on a real 4-copies-at-one-branch example (2026-09-12).
 
+- Gotcha (found via a real run, 2026-09-13): searching by the exact ISBN13
+  from the Goodreads shelf and finding *a* VOEBB record for it isn't the
+  same as finding *the copy the library actually stocks* -- a real book
+  ("Educated" by Tara Westover) was reported "found, not at a target
+  branch" via its Goodreads ISBN13's own catalog record, while the user
+  had directly verified a physical copy at a target branch under what's
+  almost certainly a different print edition/ISBN of the same title.
+  search_book now also tries the title+author search (not merely as a
+  fallback for "ISBN13 found nothing", but whenever the ISBN13-specific
+  edition shows no target-branch holdings) and merges in whatever real
+  holdings that second catalog record's Exemplarangaben table shows --
+  still only ever real, read-off-the-page data, just checking a second
+  edition instead of trusting one ISBN to speak for the whole title.
+- Gotcha (found via real runs, 2026-09-13): VOEBB is occasionally just
+  slow -- "Timeout 15000ms exceeded" errors have shown up on different
+  books across different runs, never the same book twice, which is
+  network/site slowness rather than anything book-specific. A bare
+  timeout is now retried once (_run_one_search_with_retry) before being
+  recorded as a real per-book error, and the timeout ceiling itself was
+  raised from 15s to 30s.
+
 Everything else below this point (what a "0 results" page says, what the
 stale-session interstitial looks like) is still an educated guess -- we
 haven't happened to see either live yet. If `vobb-read run` starts
@@ -64,7 +85,7 @@ from pathlib import Path
 
 from .models import BranchHolding
 
-DEFAULT_TIMEOUT_MS = 15_000
+DEFAULT_TIMEOUT_MS = 30_000
 
 # Every result-row title link observed so far matches this pattern
 # (?sp=SPROD00&sp=SAK<digits>). Rows are emitted in display order, and a
@@ -330,6 +351,25 @@ def _run_one_search(page, base_url: str, query: str, selectors: Selectors, timeo
     return True
 
 
+def _run_one_search_with_retry(
+    page, base_url: str, query: str, selectors: Selectors, timeout=DEFAULT_TIMEOUT_MS, retry_delay: float = 3.0
+) -> bool:
+    """Same as _run_one_search, but retries once if the failure looks like a
+    navigation/network timeout rather than a real site response. Confirmed
+    on real runs (2026-09-13): "Timeout 15000ms exceeded" errors on
+    different books across different runs, not tied to any specific book --
+    that's VOEBB being occasionally slow to respond, not a per-book
+    problem, so a bare timeout shouldn't be recorded as a permanent search
+    failure without trying again once."""
+    try:
+        return _run_one_search(page, base_url, query, selectors, timeout=timeout)
+    except Exception as exc:
+        if "timeout" not in str(exc).lower():
+            raise
+        time.sleep(retry_delay)
+        return _run_one_search(page, base_url, query, selectors, timeout=timeout)
+
+
 def _find_physical_result_link(page):
     """Return the first result-row title link that belongs to a physical
     (non-online-only) item, using the lrb_<row index>_12 "Standort" button
@@ -398,6 +438,41 @@ def _read_exemplare_rows(page) -> list[tuple[str, str]]:
     return pairs
 
 
+def _collect_holdings_for_current_result(page, selectors: Selectors, branches: list[BranchConfig]) -> list[BranchHolding]:
+    """Read holdings off whatever result page `page` is currently showing.
+    Ground truth for "are we on a page with real holdings data" is the
+    Exemplarangaben table itself -- not a keyword guess (see
+    _click_best_physical_result's docstring for why that broke)."""
+    table_rows = _read_exemplare_rows(page)
+    if not table_rows:
+        _click_best_physical_result(page, selectors)
+        table_rows = _read_exemplare_rows(page)
+
+    if table_rows:
+        return extract_holdings_from_table_rows(table_rows, branches)
+    if selectors.holdings_container:
+        # Only trust a whole-page text scan when a specific container was
+        # explicitly calibrated for it -- scanning the *whole* page risks
+        # matching unrelated chrome (e.g. VOEBB's branch-picker dropdown,
+        # present on every page, lists every branch in Berlin regardless of
+        # this book's actual copies).
+        return extract_holdings_from_text(page.inner_text(selectors.holdings_container), branches)
+    # Found in the catalog but we couldn't read a holdings table for it --
+    # [] is honest (no branches) rather than risking a false match.
+    return []
+
+
+def _merge_holdings(existing: list[BranchHolding], extra: list[BranchHolding]) -> list[BranchHolding]:
+    seen = {(h.branch_id, h.status) for h in existing}
+    merged = list(existing)
+    for h in extra:
+        key = (h.branch_id, h.status)
+        if key not in seen:
+            merged.append(h)
+            seen.add(key)
+    return merged
+
+
 def search_book(
     page,
     base_url: str,
@@ -407,46 +482,43 @@ def search_book(
     branches: list[BranchConfig],
     selectors: Selectors,
 ) -> dict:
-    """Search VOEBB for one book: try ISBN13 first, fall back to title+author.
+    """Search VOEBB for one book: try ISBN13 first, then also try
+    title+author -- not only as a fallback when ISBN13 finds nothing, but
+    *also* when ISBN13 finds the book but at none of the target branches.
+
+    Why: a library catalog is keyed by exact edition/ISBN, and the physical
+    copy VOEBB actually stocks is often a different print edition than
+    whatever ISBN happens to be on the Goodreads shelf entry (confirmed
+    real case, 2026-09-13: "Educated" by Tara Westover reported as "found,
+    not at a target branch" via its Goodreads ISBN13, while the user had
+    directly verified a copy on the shelf at a target branch -- almost
+    certainly a different edition/ISBN of the same title). Searching by
+    title+author too and merging in whatever real holdings that edition's
+    Exemplarangaben table shows is still all real, verified data -- just
+    checking a second real catalog record instead of assuming one ISBN
+    speaks for the whole title.
 
     Returns {"found": bool, "matched_by": str, "holdings": [BranchHolding], "error": str}
     """
     result = {"found": False, "matched_by": "", "holdings": [], "error": ""}
+    matched_by: list[str] = []
+    holdings: list[BranchHolding] = []
     try:
         if isbn13:
-            if _run_one_search(page, base_url, isbn13, selectors):
+            if _run_one_search_with_retry(page, base_url, isbn13, selectors):
                 result["found"] = True
-                result["matched_by"] = "isbn13"
+                matched_by.append("isbn13")
+                holdings = _collect_holdings_for_current_result(page, selectors, branches)
 
-        if not result["found"] and (title or author):
+        if (not result["found"] or not holdings) and (title or author):
             query = " ".join(p for p in [title, author] if p)
-            if _run_one_search(page, base_url, query, selectors):
+            if _run_one_search_with_retry(page, base_url, query, selectors):
                 result["found"] = True
-                result["matched_by"] = "title_author"
+                matched_by.append("title_author")
+                holdings = _merge_holdings(holdings, _collect_holdings_for_current_result(page, selectors, branches))
 
-        if result["found"]:
-            # Ground truth for "are we on a page with real holdings data" is
-            # the Exemplarangaben table itself -- not a keyword guess (see
-            # _click_best_physical_result's docstring for why that broke).
-            table_rows = _read_exemplare_rows(page)
-            if not table_rows:
-                _click_best_physical_result(page, selectors)
-                table_rows = _read_exemplare_rows(page)
-
-            if table_rows:
-                result["holdings"] = extract_holdings_from_table_rows(table_rows, branches)
-            elif selectors.holdings_container:
-                # Only trust a whole-page text scan when a specific
-                # container was explicitly calibrated for it -- scanning the
-                # *whole* page risks matching unrelated chrome (e.g. VOEBB's
-                # branch-picker dropdown, present on every page, lists every
-                # branch in Berlin regardless of this book's actual copies).
-                result["holdings"] = extract_holdings_from_text(
-                    page.inner_text(selectors.holdings_container), branches
-                )
-            # else: found in the catalog but we couldn't read a holdings
-            # table for it -- holdings stays [], which is honest (no
-            # branches) rather than risking a false match.
+        result["matched_by"] = "+".join(matched_by)
+        result["holdings"] = holdings
     except Exception as exc:  # noqa: BLE001 - surface any Playwright/site error per-book, don't crash the run
         result["error"] = str(exc)
 
