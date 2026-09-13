@@ -93,12 +93,43 @@ Run the whole pipeline (steps 1–5) with one command:
 vobb-read run
 ```
 
+Or, more simply, run the convenience script from the project folder:
+
+```
+./check-library.sh
+```
+
+(Same thing — activates the virtual environment for you and runs `vobb-read
+run --headed`. This is the one command to remember for every future check.)
+
 It fetches your shelf, filters it, shows you the filtered list, asks you to
 confirm before hitting VÖBB, then searches and writes a timestamped report
-to `out/report-<timestamp>.md`. Add `--headed` to watch the browser while it
-searches (recommended — and **don't close or click into that browser window
-while it's running**, it needs to stay open and untouched until the command
-finishes), or `-y` to skip the confirmation prompt once you trust it.
+to `out/report-<timestamp>.md` **and** `out/report-<timestamp>.html` — plus
+a fixed-name copy at `out/latest_report.html` that's always the most recent
+run, so you don't have to hunt through timestamped files (this is the one
+worth bookmarking). It opens automatically when the run finishes. Add
+`--headed` to watch the browser while it searches (recommended — and
+**don't close or click into that browser window while it's running**, it
+needs to stay open and untouched until the command finishes), or `-y` to
+skip the confirmation prompt once you trust it.
+
+### Adding new books later
+
+Whenever you add books to your Goodreads shelf, there's no separate step to
+"register" them — just run the check again:
+
+```
+./check-library.sh
+```
+
+Every run re-fetches your *entire* shelf from Goodreads, so any book you've
+added (or removed) since the last run is automatically picked up — nothing
+to configure. It also re-checks *every* kept book against VÖBB again, not
+just the new ones: that's intentional, since a book's availability (on
+loan, back on the shelf, etc.) can change between runs too. Open Library
+lookups are cached, so books you've already looked up before resolve
+instantly; only genuinely new ISBNs hit the network there. Read the fresh
+`out/latest_report.html` when it opens.
 
 You can also run each step on its own, which is useful while calibrating or
 if a run gets interrupted partway:

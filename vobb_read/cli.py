@@ -226,13 +226,20 @@ def cmd_report(args):
     out_path = Path(args.output) if args.output else _out_dir() / "report.md"
     out_path.write_text(md)
 
+    html = report.generate_html(results, excluded=excluded)
     html_path = out_path.with_suffix(".html")
-    html_path.write_text(report.generate_html(results, excluded=excluded))
+    html_path.write_text(html)
+
+    # Also keep a fixed-name copy so there's always one link to bookmark,
+    # instead of hunting for the newest timestamped file each time.
+    latest_html = _out_dir() / "latest_report.html"
+    latest_html.write_text(html)
 
     print(f"Report written to {out_path}")
     print(f"Nicer-looking version: {html_path}")
+    print(f"(always up to date at: {latest_html})")
     if not args.no_open:
-        _open_in_browser(html_path)
+        _open_in_browser(latest_html)
 
 
 # ---------------------------------------------------------------------------
@@ -275,13 +282,20 @@ def cmd_run(args):
     out_path = _out_dir() / f"report-{stamp}.md"
     out_path.write_text(md)
 
+    html = report.generate_html(results, excluded=excluded)
     html_path = _out_dir() / f"report-{stamp}.html"
-    html_path.write_text(report.generate_html(results, excluded=excluded))
+    html_path.write_text(html)
+
+    # Also keep a fixed-name copy so there's always one link to bookmark,
+    # instead of hunting for the newest timestamped file each time.
+    latest_html = _out_dir() / "latest_report.html"
+    latest_html.write_text(html)
 
     print(f"\nDone. Report written to {out_path}")
     print(f"Nicer-looking version: {html_path}")
+    print(f"(always up to date at: {latest_html})")
     if not args.no_open:
-        _open_in_browser(html_path)
+        _open_in_browser(latest_html)
 
 
 # ---------------------------------------------------------------------------
