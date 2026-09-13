@@ -85,18 +85,16 @@ def test_enrich_books_filters_correctly(monkeypatch, tmp_path):
         return _FakeResponse({}, status_code=404)
 
     def fake_get_dispatch(url, params=None, headers=None, timeout=None):
-        # vobb_read.openlibrary and vobb_read.googlebooks both do `import
-        # requests`, which is the same module object either way -- so there's
-        # only one `requests.get` to patch, dispatched here by URL. None of
-        # these 7 books should ever need the Google Books fallback (each
-        # already resolves via Open Library, or has no ISBN13 at all).
-        if "googleapis.com" in url:
-            raise AssertionError("should not call Google Books here")
+        # None of these 7 books should ever need the search-index fallback
+        # (each already resolves via the edition API, or has no ISBN13 at
+        # all) -- assert that by making any search.json call an error.
+        if "search.json" in url:
+            raise AssertionError("should not call the search-index fallback here")
         return fake_get(url, params=params, headers=headers, timeout=timeout)
 
     monkeypatch.setattr("vobb_read.openlibrary.requests.get", fake_get_dispatch)
 
-    enriched = enrich_books(books, cache_path=tmp_path / "cache.json", google_cache_path=tmp_path / "google.json", delay=0)
+    enriched = enrich_books(books, cache_path=tmp_path / "cache.json", search_cache_path=tmp_path / "search.json", delay=0)
     by_id = {e.book.book_id: e for e in enriched}
 
     assert by_id["1"].passes_filter is True
@@ -112,27 +110,24 @@ def test_enrich_books_filters_correctly(monkeypatch, tmp_path):
     assert by_id["7"].is_physical is None
 
 
-def test_enrich_books_falls_back_to_google_books_when_open_library_has_nothing(monkeypatch, tmp_path):
+def test_enrich_books_falls_back_to_open_library_search_when_edition_api_has_nothing(monkeypatch, tmp_path):
     books = [
-        # Not on Open Library at all, but Google Books has it in English -> recovered automatically.
+        # Not on the edition API at all, but the Search index has it in English -> recovered automatically.
         Book(book_id="1", title="Etna", author="Paul Yoon", isbn="1668020823", isbn13="9781668020821"),
-        # Open Library has a record but no languages field; Google Books resolves it to German -> still excluded.
+        # Edition API has a record but no languages field; Search resolves it to German -> still excluded.
         Book(book_id="2", title="Some German Book", author="X", isbn=None, isbn13="2222222222222"),
         # Neither source has anything -> stays unverifiable, not a guess.
         Book(book_id="3", title="Totally Obscure", author="Y", isbn="3030303030", isbn13="3333333333333"),
     ]
 
     def fake_get(url, params=None, headers=None, timeout=None):
-        # vobb_read.openlibrary and vobb_read.googlebooks both do `import
-        # requests`, which is the same module object -- there's only one
-        # `requests.get` to patch, dispatched here by URL/host.
-        if "googleapis.com" in url:
+        if "search.json" in url:
             q = (params or {}).get("q", "")
             if "9781668020821" in q or "1668020823" in q:
-                return _FakeResponse({"items": [{"volumeInfo": {"language": "en"}}]})
+                return _FakeResponse({"docs": [{"language": ["eng"]}]})
             if "2222222222222" in q:
-                return _FakeResponse({"items": [{"volumeInfo": {"language": "de"}}]})
-            return _FakeResponse({"items": []})
+                return _FakeResponse({"docs": [{"language": ["ger"]}]})
+            return _FakeResponse({"docs": []})
         if "api/books" in url:
             bibkeys = (params or {}).get("bibkeys", "")
             if "2222222222222" in bibkeys:
@@ -142,17 +137,17 @@ def test_enrich_books_falls_back_to_google_books_when_open_library_has_nothing(m
 
     monkeypatch.setattr("vobb_read.openlibrary.requests.get", fake_get)
 
-    enriched = enrich_books(books, cache_path=tmp_path / "cache.json", google_cache_path=tmp_path / "google.json", delay=0)
+    enriched = enrich_books(books, cache_path=tmp_path / "cache.json", search_cache_path=tmp_path / "search.json", delay=0)
     by_id = {e.book.book_id: e for e in enriched}
 
     assert by_id["1"].passes_filter is True
     assert by_id["1"].is_target_language is True
-    assert "Google Books" not in by_id["1"].lookup_note  # only annotated on exclusion, not success
+    assert "search index" not in by_id["1"].lookup_note  # only annotated on exclusion, not success
 
     assert by_id["2"].passes_filter is False
     assert by_id["2"].is_target_language is False
-    assert "Google Books" in by_id["2"].lookup_note
+    assert "search index" in by_id["2"].lookup_note
 
     assert by_id["3"].passes_filter is False
     assert by_id["3"].is_target_language is None
-    assert "no language data from Open Library or Google Books" in by_id["3"].lookup_note
+    assert "no language data from Open Library's edition or search index" in by_id["3"].lookup_note

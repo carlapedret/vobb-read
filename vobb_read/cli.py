@@ -72,8 +72,8 @@ def _fetch_and_filter(rss_url: str) -> tuple[list[EnrichedBook], list[EnrichedBo
 
     print("Looking up each ISBN13 on Open Library (language + format)...")
     cache_path = _out_dir() / "cache" / "openlibrary_cache.json"
-    google_cache_path = _out_dir() / "cache" / "googlebooks_cache.json"
-    enriched = openlibrary.enrich_books(books, cache_path=cache_path, google_cache_path=google_cache_path)
+    search_cache_path = _out_dir() / "cache" / "openlibrary_search_cache.json"
+    enriched = openlibrary.enrich_books(books, cache_path=cache_path, search_cache_path=search_cache_path)
     _apply_overrides(enriched, _load_overrides(_config("overrides.json")))
 
     kept = [e for e in enriched if e.passes_filter]

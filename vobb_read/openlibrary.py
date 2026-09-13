@@ -18,18 +18,27 @@ David Szalay resolved by ISBN10 after its derived ISBN13 came up empty
 (too new to be catalogued under that key yet).
 
 If Open Library still has no language data at that point -- either no
-record at all, or a record missing the languages field -- we try Google
-Books (googlebooks.py) as a second, independent real data source before
-giving up. This is what recovers most of the "not found on Open Library"
-books automatically instead of needing a manual override per book (see
+edition record at all, or a record missing the languages field -- we try
+Open Library's own *Search* index (a separate, broader dataset built from
+many sources, keyed by ISBN via openlibrary.org/search.json) before giving
+up. This is what recovers most of the "not found on Open Library" books
+automatically instead of needing a manual override per book (see
 config/overrides.json for the ones neither source has).
 
-We NEVER infer language or format from title/publisher -- if neither
-Open Library nor Google Books has usable data for a book,
-is_target_language / is_physical come back as None ("unverifiable") rather
-than a guess, and the
-book is excluded from the final filtered list with a note explaining why,
-so it can be checked by hand.
+(An earlier version of this tried Google Books for this fallback instead.
+Dropped 2026-09-13: confirmed live that Google's public Books API gives
+completely unauthenticated callers a *zero* per-day query quota --
+`quota_limit_value: "0"` in its own 429 response -- so it never actually
+returned anything without an API key. Open Library's Search API needs no
+key and, being Open Library's own index, returns the same 3-letter
+language codes as the edition API above -- no second code scheme to keep
+in sync.)
+
+We NEVER infer language or format from title/publisher -- if neither of
+Open Library's own APIs has usable data for a book, is_target_language /
+is_physical come back as None ("unverifiable") rather than a guess, and
+the book is excluded from the final filtered list with a note explaining
+why, so it can be checked by hand.
 """
 
 from __future__ import annotations
@@ -40,11 +49,11 @@ from pathlib import Path
 
 import requests
 
-from . import googlebooks
 from .models import Book, EnrichedBook
 
 API_BOOKS_URL = "https://openlibrary.org/api/books"
 API_ISBN_URL = "https://openlibrary.org/isbn/{isbn13}.json"
+SEARCH_API_URL = "https://openlibrary.org/search.json"
 USER_AGENT = "vobb-read/0.1 (personal reading-list tool; https://github.com/carlapedret/vobb-read)"
 
 BATCH_SIZE = 20  # Open Library docs allow up to ~100 bibkeys per call; stay conservative.
@@ -125,10 +134,11 @@ class OpenLibraryCache:
         self.path.write_text(json.dumps(self._data, indent=2, ensure_ascii=False))
 
 
-class GoogleBooksCache:
-    """Tiny on-disk cache of isbn13 -> Google Books language code (or None).
-    Separate file from OpenLibraryCache since it's a different, smaller
-    lookup (language only, only tried when Open Library came up short)."""
+class SearchFallbackCache:
+    """Tiny on-disk cache of isbn13 -> language codes from Open Library's
+    Search API (or [] if it had nothing either). Separate file from
+    OpenLibraryCache since it's a different, smaller lookup (language only,
+    only tried when the edition API came up short)."""
 
     def __init__(self, path: Path | None):
         self.path = path
@@ -142,11 +152,11 @@ class GoogleBooksCache:
     def has(self, isbn13: str) -> bool:
         return isbn13 in self._data
 
-    def get(self, isbn13: str) -> str | None:
-        return self._data.get(isbn13)
+    def get(self, isbn13: str) -> list[str]:
+        return self._data.get(isbn13, [])
 
-    def set(self, isbn13: str, lang: str | None) -> None:
-        self._data[isbn13] = lang
+    def set(self, isbn13: str, lang_codes: list[str]) -> None:
+        self._data[isbn13] = lang_codes
 
     def save(self):
         if not self.path:
@@ -244,21 +254,47 @@ def _resolve_after_batch_miss(book: Book, timeout: int, delay: float) -> dict | 
     return None
 
 
+def _fetch_search_language_codes(isbn: str, timeout: int) -> list[str]:
+    """Query Open Library's Search index (openlibrary.org/search.json) for
+    an ISBN's language. This is a different, broader dataset than the
+    per-edition Books API above -- it sometimes has language data for
+    editions the Books API hasn't indexed at all yet. Returns the same
+    3-letter codes as extract_language_codes, or [] if nothing came back
+    (never raises -- a network hiccup here just means we stay unverifiable,
+    same as any other "no data" case)."""
+    try:
+        resp = requests.get(
+            SEARCH_API_URL,
+            params={"q": f"isbn:{isbn}", "fields": "language", "limit": 1},
+            headers={"User-Agent": USER_AGENT},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except requests.RequestException:
+        return []
+    docs = payload.get("docs") or []
+    if not docs:
+        return []
+    return docs[0].get("language") or []
+
+
 def enrich_books(
     books: list[Book],
     cache_path: Path | None = None,
-    google_cache_path: Path | None = None,
+    search_cache_path: Path | None = None,
     delay: float = 0.5,
     timeout: int = 20,
 ) -> list[EnrichedBook]:
     """Look up every book's ISBN13 (falling back to its ISBN10 if the ISBN13
     doesn't resolve -- see module docstring) on Open Library and classify it.
-    Falls back to Google Books for language only when Open Library has none.
+    Falls back to Open Library's Search API for language only when the
+    edition API has none.
 
     Books without an ISBN13 in the Goodreads feed at all are unverifiable.
     """
     cache = OpenLibraryCache(cache_path)
-    google_cache = GoogleBooksCache(google_cache_path)
+    search_cache = SearchFallbackCache(search_cache_path)
 
     to_fetch = [b for b in books if b.isbn13 and not cache.has(b.isbn13)]
     for i in range(0, len(to_fetch), BATCH_SIZE):
@@ -290,18 +326,22 @@ def enrich_books(
         is_target_language = classify_language(lang_codes) if details is not None else None
         is_physical = classify_format(fmt) if details is not None else None
 
-        google_lang = None
+        via_search = False
         if is_target_language is None:
-            # No Open Library record at all, or a record with no usable
-            # language field -- try Google Books before giving up.
-            if google_cache.has(book.isbn13):
-                google_lang = google_cache.get(book.isbn13)
+            # No Open Library edition record at all, or a record with no
+            # usable language field -- try the Search API before giving up.
+            if search_cache.has(book.isbn13):
+                search_lang_codes = search_cache.get(book.isbn13)
             else:
-                google_lang = googlebooks.fetch_language(book.isbn13, book.isbn, timeout)
-                google_cache.set(book.isbn13, google_lang)
+                search_lang_codes = _fetch_search_language_codes(book.isbn13, timeout)
+                if not search_lang_codes and book.isbn:
+                    search_lang_codes = _fetch_search_language_codes(book.isbn, timeout)
+                search_cache.set(book.isbn13, search_lang_codes)
                 time.sleep(delay)
-            if google_lang:
-                is_target_language = googlebooks.classify_language(google_lang)
+            if search_lang_codes:
+                lang_codes = search_lang_codes
+                is_target_language = classify_language(lang_codes)
+                via_search = True
 
         notes = []
         if details is None:
@@ -310,18 +350,17 @@ def enrich_books(
             )
             notes.append(f"ISBN13 {book.isbn13} {reason}")
         if is_target_language is None:
-            notes.append("no language data from Open Library or Google Books")
+            notes.append("no language data from Open Library's edition or search index")
         elif is_target_language is False:
-            source = "Google Books" if google_lang and not lang_codes else "Open Library"
-            lang_display = google_lang if (google_lang and not lang_codes) else ", ".join(lang_codes)
-            notes.append(f"not English/Spanish ({source} language: {lang_display or 'unknown'})")
+            source = "Open Library search index" if via_search else "Open Library"
+            notes.append(f"not English/Spanish ({source} language: {', '.join(lang_codes) or 'unknown'})")
         if details is not None and is_physical is None:
             notes.append(f"could not classify physical_format={fmt!r}")
 
         enriched.append(
             EnrichedBook(
                 book=book,
-                language_codes=lang_codes or ([google_lang] if google_lang else []),
+                language_codes=lang_codes,
                 physical_format=fmt,
                 is_target_language=is_target_language,
                 is_physical=is_physical,
@@ -329,5 +368,5 @@ def enrich_books(
             )
         )
 
-    google_cache.save()
+    search_cache.save()
     return enriched
